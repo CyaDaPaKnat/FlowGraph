@@ -1184,15 +1184,12 @@ void UFlowGraphNode::ForcePinActivation(const FEdGraphPinReference PinReference)
 		return;
 	}
 
-	FWorldContext* WorldContext = GEngine->GetWorldContextFromWorld(InspectedNodeInstance->GetWorld());
-	if (WorldContext && WorldContext->PIEInstance != INDEX_NONE)
-	{
-		FTemporaryPlayInEditorIDOverride PIEGuard(WorldContext->PIEInstance);
+	FScopedConditionalWorldSwitcher WorldSwitcher(InspectedNodeInstance->GetWorld());
 
-		if (const UEdGraphPin* FoundPin = PinReference.Get())
+	if (const UEdGraphPin* FoundPin = PinReference.Get())
+	{
+		switch (FoundPin->Direction)
 		{
-			switch (FoundPin->Direction)
-			{
 			case EGPD_Input:
 				InspectedNodeInstance->TriggerInput(FoundPin->PinName, EFlowPinActivationType::Forced);
 				break;
@@ -1201,7 +1198,6 @@ void UFlowGraphNode::ForcePinActivation(const FEdGraphPinReference PinReference)
 				break;
 			default:
 				break;
-			}
 		}
 	}
 }
