@@ -1866,18 +1866,10 @@ bool CheckPinsMatch(const TArray<FFlowPin>& LeftPins, const TArray<FFlowPin>& Ri
 		return false;
 	}
 
-	for (const FFlowPin& Left : LeftPins)
+	for (int32 Index = 0; Index < LeftPins.Num(); ++Index)
 	{
-		// Do a deep pin match (not a simple name-only match)
-		auto PinsAreEqualPredicate = [&Left](const FFlowPin& Right)
+		if (!LeftPins[Index].DeepIsEqual(RightPins[Index]))
 		{
-			return Left.DeepIsEqual(Right);
-		};
-
-		// For each required pin, make sure the existing pins array contains a pin that matches by name and type 
-		if (!RightPins.ContainsByPredicate(PinsAreEqualPredicate))
-		{
-			// Something didn't match!
 			return false;
 		}
 	}
