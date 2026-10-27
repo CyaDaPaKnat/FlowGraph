@@ -107,7 +107,7 @@ public:
 	// --
 
 	// variants of K2Node methods
-	void RewireOldPinsToNewPins(TArray<UEdGraphPin*>& InOldPins);
+	void RewireOldPinsToNewPins(TArray<UEdGraphPin*>& InOldPins, const TMap<FName, FName>& PinNameRemap);
 	static void ReconstructSinglePin(UEdGraphPin* NewPin, UEdGraphPin* OldPin);
 	// --
 
@@ -181,7 +181,7 @@ public:
 protected:
 	bool CanReconstructNode() const;
 
-	bool TryUpdateNodePins() const;
+	bool TryUpdateNodePins(TMap<FName, FName>& OutAutoDataPinNameRemap) const;
 	bool CheckGraphPinsMatchNodePins() const;
 
 //////////////////////////////////////////////////////////////////////////
@@ -266,9 +266,12 @@ public:
 	virtual void DestroyNode() override;
 	virtual void NodeConnectionListChanged() override;
 	virtual void FindDiffs(class UEdGraphNode* OtherNode, struct FDiffResults& Results) override;
+
+protected:
 	virtual FString GetPropertyNameAndValueForDiff(const FProperty* Prop, const uint8* PropertyAddr) const override;
 	// --
 
+public:
 	void SetParentNodeForSubNode(UFlowGraphNode* InParentNode);
 	UFlowGraphNode* GetParentNode() const { return ParentNode; }
 
@@ -287,9 +290,7 @@ public:
 	static void DiffSubNodes(const FText& NodeTypeDisplayName, const TArray<UFlowGraphNode*>& LhsSubNodes, const TArray<UFlowGraphNode*>& RhsSubNodes, FDiffResults& Results);
 
 	// UObject
-#if WITH_EDITOR
 	virtual void PostEditUndo() override;
-#endif
 	// --
 
 	virtual UEdGraphPin* GetInputPin(int32 InputIndex = 0) const;
@@ -299,6 +300,10 @@ public:
 	virtual FText GetDescription() const;
 
 	void AddSubNode(UFlowGraphNode* SubNode);
+	void AddSubNode(UFlowGraphNode* SubNode, class UEdGraph* ParentGraph);
+	bool AddSubNodeForRegraph(UFlowGraphNode* SubNode, UEdGraph* ParentGraph);
+	void ReparentSubNodeForRegraph(UFlowGraphNode* SubNode);
+	void RemoveSubNodeForRegraph(UFlowGraphNode* SubNode);
 	void RemoveSubNode(UFlowGraphNode* SubNode);
 	virtual void RemoveAllSubNodes();
 	virtual void OnSubNodeRemoved(UFlowGraphNode* SubNode);
@@ -306,6 +311,10 @@ public:
 
 	virtual int32 FindSubNodeDropIndex(UFlowGraphNode* SubNode) const;
 	virtual void InsertSubNodeAt(UFlowGraphNode* SubNode, const int32 DropIndex);
+
+	/* Moves all SubNodes of the given node to this node
+	 * Used when replacing a graph node with one of a different class. */
+	void MoveSubNodesFrom(UFlowGraphNode& OtherNode);
 
 	virtual bool IsSubNode() const;
 

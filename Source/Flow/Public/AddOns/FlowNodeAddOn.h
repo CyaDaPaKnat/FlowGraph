@@ -28,7 +28,6 @@ public:
 	FLOW_API virtual void PostEditImport() override;
 #endif
 	// --
-	
 protected:
 	/* The Flow Node that contains this AddOn.
 	 * Accessible only when initialized, runtime only. */
@@ -72,6 +71,10 @@ public:
 	FLOW_API virtual void DeinitializeInstance() override;
 	// --
 
+	// UFlowNodeBase
+	FLOW_API virtual void InitializeReplica() override;
+	// --
+
 	// UFlowNodeAddOn
 
 	/* The FlowNode that contains this AddOn.
@@ -111,6 +114,12 @@ protected:
 	void CacheFlowNode();
 
 #if WITH_EDITOR
-	TArray<FFlowPin> GetPinsForContext(const TArray<FFlowPin>& Context) const;
+	/**
+	 * Combines this AddOn's pins with the inherited context for one direction.
+	 * @param Context The pins contributed by this AddOn: InputPins or OutputPins.
+	 * @param BaseContext The superclass context for that same direction, copied before appending Context.
+	 * @return BaseContext followed by the valid pins from Context.
+	 */
+	TArray<FFlowPin> GetPinsForContext(const TArray<FFlowPin>& Context, const TArray<FFlowPin>& BaseContext) const;
 #endif
 };

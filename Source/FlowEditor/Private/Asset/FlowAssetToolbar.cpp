@@ -1,5 +1,4 @@
 // Copyright https://github.com/MothCocoon/FlowGraph/graphs/contributors
-
 #include "Asset/FlowAssetToolbar.h"
 
 #include "Graph/FlowGraphUtils.h"
@@ -39,9 +38,9 @@ void SFlowAssetInstanceList::Construct(const FArguments& InArgs, const TWeakObje
 {
 	TemplateAsset = InTemplateAsset;
 
-	if (TemplateAsset.IsValid())
+	if (UFlowAsset* TemplateAssetPtr = TemplateAsset.Get())
 	{
-		TemplateAsset->OnDebuggerRefresh().AddSP(this, &SFlowAssetInstanceList::RefreshInstances);
+		TemplateAssetPtr->OnDebuggerRefresh().AddSP(this, &SFlowAssetInstanceList::RefreshInstances);
 		RefreshInstances();
 	}
 
@@ -87,9 +86,9 @@ void SFlowAssetInstanceList::Construct(const FArguments& InArgs, const TWeakObje
 
 SFlowAssetInstanceList::~SFlowAssetInstanceList()
 {
-	if (TemplateAsset.IsValid())
+	if (UFlowAsset* TemplateAssetPtr = TemplateAsset.Get())
 	{
-		TemplateAsset->OnDebuggerRefresh().RemoveAll(this);
+		TemplateAssetPtr->OnDebuggerRefresh().RemoveAll(this);
 	}
 }
 
@@ -117,8 +116,24 @@ void SFlowAssetInstanceList::RefreshInstances()
 	// add empty instance as default
 	Instances.Add(MakeShareable(new FObjectKey(nullptr)));
 
-	// gather all instances of given UFlowAsset
-	for (const UFlowAsset* ActiveInstance : TemplateAsset->GetActiveInstances())
+	// gather all instances of given UFlowAsset, including replicas on clients
+	TArray<const UFlowAsset*> AllInstances;
+	if (const UFlowAsset* TemplateAssetPtr = TemplateAsset.Get())
+	{
+		for (const UFlowAsset* ActiveInstance : TemplateAssetPtr->GetActiveInstances())
+		{
+			AllInstances.Add(ActiveInstance);
+		}
+		for (const TWeakObjectPtr<UFlowAsset>& ReplicaInstance : TemplateAssetPtr->GetReplicaInstances())
+		{
+			if (const UFlowAsset* Replica = ReplicaInstance.Get())
+			{
+				AllInstances.Add(Replica);
+			}
+		}
+	}
+
+	for (const UFlowAsset* ActiveInstance : AllInstances)
 	{
 		Instances.Add(MakeShareable(new FObjectKey(ActiveInstance)));
 
@@ -193,9 +208,9 @@ void SFlowAssetInstanceList::OnContextSelectionChanged(TSharedPtr<FObjectKey> Se
 	{
 		SelectedContext = SelectedItem;
 
-		if (TemplateAsset.IsValid())
+		if (UFlowAsset* TemplateAssetPtr = TemplateAsset.Get())
 		{
-			TemplateAsset->SetInspectedInstance(nullptr);
+			TemplateAssetPtr->SetInspectedInstance(nullptr);
 		}
 	}
 }
@@ -226,9 +241,9 @@ void SFlowAssetInstanceList::OnInstanceSelectionChanged(const TSharedPtr<FObject
 		SelectedInstance = SelectedItem;
 
 		const UFlowAsset* Instance = Cast<UFlowAsset>(SelectedInstance->ResolveObjectPtr());
-		if (TemplateAsset.IsValid())
+		if (UFlowAsset* TemplateAssetPtr = TemplateAsset.Get())
 		{
-			TemplateAsset->SetInspectedInstance(Instance);
+			TemplateAssetPtr->SetInspectedInstance(Instance);
 		}
 	}
 }
@@ -328,20 +343,27 @@ void SFlowAssetBreadcrumb::FillBreadcrumb() const
 
 void SFlowAssetBreadcrumb::OnCrumbClicked(const FFlowBreadcrumb& Item) const
 {
-	const UFlowAsset* InspectedInstance = TemplateAsset->GetInspectedInstance();
-	if (InspectedInstance == nullptr || Item.CurrentInstance != TemplateAsset)
+	const UFlowAsset* TemplateAssetPtr = TemplateAsset.Get();
+	const UFlowAsset* InspectedInstance = TemplateAssetPtr ?TemplateAssetPtr->GetInspectedInstance() : nullptr;
+	if (InspectedInstance == nullptr || Item.CurrentInstance != InspectedInstance)
 	{
 		const TWeakObjectPtr<const UFlowAsset> ClickedInstance = Item.CurrentInstance;
-		UFlowAsset* ClickedTemplateAsset = ClickedInstance->GetTemplateAsset();
-
-		if (GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(ClickedTemplateAsset))
+		if (const UFlowAsset* ClickedInstancePtr = ClickedInstance.Get())
 		{
-			ClickedTemplateAsset->SetInspectedInstance(ClickedInstance);
-			if (const TSharedPtr<FFlowAssetEditor> FlowAssetEditor = FFlowGraphUtils::GetFlowAssetEditor(ClickedTemplateAsset))
+			UFlowAsset* ClickedTemplateAsset = ClickedInstancePtr->GetTemplateAsset();
+
+			if (GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(ClickedTemplateAsset))
 			{
-				if (Item.ChildInstance.IsValid())
+				ClickedTemplateAsset->SetInspectedInstance(ClickedInstance);
+				if (const TSharedPtr<FFlowAssetEditor> FlowAssetEditor = FFlowGraphUtils::GetFlowAssetEditor(ClickedTemplateAsset))
 				{
-					FlowAssetEditor->JumpToNode(Item.ChildInstance->GetNodeOwningThisAssetInstance()->GetGraphNode());
+					if (const UFlowAsset* ChildInstancePtr = Item.ChildInstance.Get())
+					{
+						if (const UFlowNode_SubGraph* OwningNode = ChildInstancePtr->GetNodeOwningThisAssetInstance())
+						{
+							FlowAssetEditor->JumpToNode(OwningNode->GetGraphNode());
+						}
+					}
 				}
 			}
 		}
@@ -455,7 +477,7 @@ TSharedRef<SWidget> FFlowAssetToolbar::MakeDiffMenu(const UFlowAssetEditorContex
 {
 	if (ISourceControlModule::Get().IsEnabled() && ISourceControlModule::Get().GetProvider().IsAvailable())
 	{
-		UFlowAsset* FlowAsset = Context ? Context->FlowAssetEditor.Pin()->GetFlowAsset() : nullptr;
+		UFlowAsset* FlowAsset = Context ? Context->GetFlowAsset() : nullptr;
 		if (FlowAsset)
 		{
 			FString Filename = SourceControlHelpers::PackageFilename(FlowAsset->GetPathName());
@@ -487,7 +509,8 @@ void FFlowAssetToolbar::BuildDebuggerToolbar(UToolMenu* ToolbarMenu)
 	Section.AddDynamicEntry("DebuggingCommands", FNewToolMenuSectionDelegate::CreateLambda([](FToolMenuSection& InSection)
 	{
 		const UFlowAssetEditorContext* Context = InSection.FindContext<UFlowAssetEditorContext>();
-		if (Context && Context->GetFlowAsset())
+		UFlowAsset* FlowAsset = Context ? Context->GetFlowAsset() : nullptr;
+		if (FlowAsset)
 		{
 			// First, and only visible while halted: the level toolbar's Resume and Stop do not work while a
 			// Flow breakpoint holds the game thread, so these are the way to continue or stop.
@@ -496,8 +519,8 @@ void FFlowAssetToolbar::BuildDebuggerToolbar(UToolMenu* ToolbarMenu)
 
 			FPlayWorldCommands::BuildToolbar(InSection);
 
-			InSection.AddEntry(FToolMenuEntry::InitWidget("AssetInstances", SNew(SFlowAssetInstanceList, Context->GetFlowAsset()), FText(), true));
-			InSection.AddEntry(FToolMenuEntry::InitWidget("AssetBreadcrumb", SNew(SFlowAssetBreadcrumb, Context->GetFlowAsset()), FText(), true));
+			InSection.AddEntry(FToolMenuEntry::InitWidget("AssetInstances", SNew(SFlowAssetInstanceList, FlowAsset), FText(), true));
+			InSection.AddEntry(FToolMenuEntry::InitWidget("AssetBreadcrumb", SNew(SFlowAssetBreadcrumb, FlowAsset), FText(), true));
 		}
 	}));
 }

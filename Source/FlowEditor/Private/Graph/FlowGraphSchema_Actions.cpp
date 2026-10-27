@@ -1,5 +1,4 @@
 // Copyright https://github.com/MothCocoon/FlowGraph/graphs/contributors
-
 #include "Graph/FlowGraphSchema_Actions.h"
 
 #include "Graph/FlowGraph.h"
@@ -153,6 +152,13 @@ UFlowGraphNode* FFlowGraphSchemaAction_NewNode::RecreateNode(UEdGraph* ParentGra
 		OldInstance->DestroyNode();
 	}
 
+	// move AddOns from the old node
+	// Done after destroying the old node, since it rebuilds runtime AddOns of the shared FlowNode from its SubNodes.
+	if (UFlowGraphNode* OldFlowGraphNode = Cast<UFlowGraphNode>(OldInstance))
+	{
+		NewGraphNode->MoveSubNodesFrom(*OldFlowGraphNode);
+	}
+
 	// call notifies
 	NewGraphNode->PostPlacedNewNode();
 	ParentGraph->NotifyGraphChanged();
@@ -245,13 +251,29 @@ UFlowGraphNode* FFlowSchemaAction_NewSubNode::RecreateNode(UEdGraph* ParentGraph
 	FlowNodeAddOn->SetGraphNode(NewGraphNode);
 	NewGraphNode->SetNodeTemplate(FlowNodeAddOn);
 
+	UFlowGraphNode* OldFlowGraphNode = Cast<UFlowGraphNode>(OldInstance);
+	const int32 OldSubNodeIndex = ParentFlowGraphNode->SubNodes.IndexOfByKey(OldFlowGraphNode);
+
 	// remove leftover
 	if (OldInstance)
 	{
 		OldInstance->DestroyNode();
 	}
 
+	// move nested AddOns from the old node
+	if (OldFlowGraphNode)
+	{
+		NewGraphNode->MoveSubNodesFrom(*OldFlowGraphNode);
+	}
+
 	ParentFlowGraphNode->AddSubNode(NewGraphNode);
+
+	// keep the position of the old node among parent's SubNodes
+	if (OldSubNodeIndex != INDEX_NONE)
+	{
+		ParentFlowGraphNode->SubNodes.RemoveSingle(NewGraphNode);
+		ParentFlowGraphNode->SubNodes.Insert(NewGraphNode, OldSubNodeIndex);
+	}
 
 	// call notifies
 	ParentGraph->NotifyGraphChanged();
@@ -260,9 +282,9 @@ UFlowGraphNode* FFlowSchemaAction_NewSubNode::RecreateNode(UEdGraph* ParentGraph
 	return NewGraphNode;
 }
 
-TSharedPtr<FFlowSchemaAction_NewSubNode> FFlowSchemaAction_NewSubNode::AddNewSubNodeAction(FGraphActionListBuilderBase& ContextMenuBuilder, const FText& Category, const FText& MenuDesc, const FText& Tooltip)
+TSharedPtr<FFlowSchemaAction_NewSubNode> FFlowSchemaAction_NewSubNode::AddNewSubNodeAction(FGraphActionListBuilderBase& ContextMenuBuilder, const FText& Category, const FText& MenuDesc, const FText& Tooltip, const FText& Keywords)
 {
-	TSharedPtr<FFlowSchemaAction_NewSubNode> NewAction = MakeShared<FFlowSchemaAction_NewSubNode>(Category, MenuDesc, Tooltip, 0);
+	TSharedPtr<FFlowSchemaAction_NewSubNode> NewAction = MakeShared<FFlowSchemaAction_NewSubNode>(Category, MenuDesc, Tooltip, 0, Keywords);
 	ContextMenuBuilder.AddAction(NewAction);
 	return NewAction;
 }

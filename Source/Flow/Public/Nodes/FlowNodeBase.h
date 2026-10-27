@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Runtime/Engine/Public/DrawDebugHelpers.h"
+#include "Layout/Margin.h"
 #include "Templates/SubclassOf.h"
 
 #include "Interfaces/FlowCoreExecutableInterface.h"
@@ -103,11 +104,21 @@ public:
 	FGuid NodeGuid;
 
 	UFUNCTION(BlueprintCallable, Category = "FlowNode")
-	void SetGuid(const FGuid& NewGuid) { NodeGuid = NewGuid; }
+	void SetGuid(const FGuid& NewGuid);
 
 	UFUNCTION(BlueprintPure, Category = "FlowNode")
 	const FGuid& GetGuid() const { return NodeGuid; }
 
+#if WITH_EDITOR
+private:
+	FGuid PreviousGuidForPinRemapping;
+	
+public:	
+	const FGuid& GetPreviousGuidForPinRemapping() const { return PreviousGuidForPinRemapping; }
+	void ClearPreviousGuidForPinRemapping() { PreviousGuidForPinRemapping.Invalidate(); }
+#endif
+
+public:
 	// UObject
 	virtual UWorld* GetWorld() const override;
 	// --
@@ -198,12 +209,15 @@ public:
 	static TArray<UFlowNodeBase*> BuildFlowNodeBaseAncestorChain(UFlowNodeBase& FromFlowNodeBase, bool bIncludeFromFlowNodeBase);
 
 //////////////////////////////////////////////////////////////////////////
-// AddOn support
+// AddOns
 
 protected:
 	/* Flow Node AddOn attachments. */
-	UPROPERTY(VisibleInstanceOnly, EditFixedSize, BlueprintReadOnly, Instanced, Category = "AddOn Details", meta = (EditFixedOrder, NoResetToDefault))
+	UPROPERTY(VisibleInstanceOnly, EditFixedSize, BlueprintReadOnly, Instanced, TextExportTransient, Category = "AddOn Details", meta = (EditFixedOrder, NoResetToDefault))
 	TArray<TObjectPtr<UFlowNodeAddOn>> AddOns;
+
+	/* Replaces AddOns copied from the template with new instances of them. */
+	void InstantiateAddOns();
 
 protected:
 	/* FlowNodes and AddOns may determine which AddOns are eligible to be their children.
@@ -267,6 +281,20 @@ public:
 	}
 
 	EFlowForEachAddOnFunctionReturnValue ForEachAddOnForClass(const UClass& InterfaceOrClass, const FFlowNodeAddOnFunction& Function, EFlowForEachAddOnChildRule AddOnChildRule = EFlowForEachAddOnChildRule::AllChildren) const;
+
+//////////////////////////////////////////////////////////////////////////
+// Network replication
+
+public:
+	/* Prepares an instance created on a client to receive replicated state.
+	 * Runs instead of InitializeInstance, which prepares the instance for executing the graph. */
+	virtual void InitializeReplica();
+	
+	/* Sends properties marked as UPROPERTY(Replicated) of the owning Flow Node and its AddOns to clients.
+	 * Call it on the server after changing these properties.
+	 * Changes of the activation state are sent without it. */
+	UFUNCTION(BlueprintCallable, Category = "FlowNode")
+	void MarkReplicatedPropertiesDirty();
 
 //////////////////////////////////////////////////////////////////////////
 // Data Pins
@@ -404,8 +432,9 @@ protected:
 
 	/* If this node is deprecated, it might be replaced by another node. */
 	UPROPERTY(EditDefaultsOnly, Category = "FlowNode")
-	TSubclassOf<UFlowNode> ReplacedBy;
+	TSoftClassPtr<UFlowNode> ReplacedBy;
 
+	friend class FScopedFlowNodeReconstructionRequestDeferral;
 	FFlowNodeEvent OnReconstructionRequested;
 	FFlowNodeEvent OnAddOnRequestedParentReconstruction;
 #endif // WITH_EDITORONLY_DATA
@@ -484,7 +513,11 @@ public:
 	virtual FText GetNodeTitle() const;
 	virtual FText GetNodeToolTip() const;
 
+	bool IsDeprecated() const { return bNodeDeprecated; }
+	const TSoftClassPtr<UFlowNode>& GetReplacedByClass() const { return ReplacedBy; }
+
 	FText GetGeneratedDisplayName() const;
+	static FString GetInheritedNodeKeywords(const UClass* NodeClass);
 
 	/**
 	 * Returns overlay icons to display on this node instance in the editor.
@@ -503,13 +536,21 @@ public:
 	 */
 	virtual bool GetCornerIcon(FName& OutBrushName, FName& OutStyleSetName) const { return false; }
 
-	/** Returns the agent-facing guidance authored on this class or supplied by a native override. */
-	virtual const FFlowAgentDoc& GetAgentDoc() const { return AgentDoc; }
+	/** The title border padding used when a node does not override its margin. */
+	static FMargin GetDefaultTitleBorderMargin() { return FMargin(10.0f, 5.0f, 30.0f, 3.0f); }
+
+	/** Returns the title border padding for this node instance. */
+	virtual FMargin GetTitleBorderMargin() const { return GetDefaultTitleBorderMargin(); }
 
 	/* Persists documentation for classes whose defaults serialize AgentDoc. Native overrides should
 	 * return their compiled-in documentation directly. */
 	void SetAgentDoc(const FFlowAgentDoc& InAgentDoc) { AgentDoc = InAgentDoc; }
 	
+	/** Returns the agent-facing guidance authored on this class or supplied by a native override. */
+	virtual const FFlowAgentDoc& GetAgentDoc() const { return AgentDoc; }
+
+	virtual void GetCatalogPins(TArray<FFlowPin>& OutInputPins, TArray<FFlowPin>& OutOutputPins) const {}
+
 protected:
 	void EnsureNodeDisplayStyle();
 #endif // WITH_EDITOR

@@ -1,5 +1,4 @@
 // Copyright https://github.com/MothCocoon/FlowGraph/graphs/contributors
-
 #include "Asset/FlowAssetEditor.h"
 
 #include "FlowEditorCommands.h"
@@ -8,7 +7,7 @@
 #include "Asset/FlowDebugEditorSubsystem.h"
 #include "Asset/FlowAssetToolbar.h"
 #include "Asset/FlowMessageLogListing.h"
-#include "DetailCustomizations/FlowNodeAddOnCustomization.h"
+#include "Details/AddOns/FlowNodeAddOnCustomization.h"
 #include "Graph/FlowGraphEditor.h"
 #include "Graph/FlowGraphEditorSettings.h"
 #include "Graph/FlowGraphEditorLayout.h"
@@ -49,11 +48,6 @@ const FName FFlowAssetEditor::PaletteTab(TEXT("Palette"));
 const FName FFlowAssetEditor::RuntimeLogTab(TEXT("RuntimeLog"));
 const FName FFlowAssetEditor::SearchTab(TEXT("Search"));
 const FName FFlowAssetEditor::ValidationLogTab(TEXT("ValidationLog"));
-
-FFlowAssetEditor::FFlowAssetEditor()
-	: FlowAsset(nullptr)
-{
-}
 
 FFlowAssetEditor::~FFlowAssetEditor()
 {
@@ -209,16 +203,18 @@ void FFlowAssetEditor::SaveAssetAs_Execute()
 	FAssetEditorToolkit::SaveAssetAs_Execute();
 }
 
-void FFlowAssetEditor::DoPreSaveAssetUpdate() const
+void FFlowAssetEditor::OnAssetsSaved(const TArray<UObject*>& SavedObjects)
 {
-	if (IsValid(FlowAsset))
-	{
-		UFlowGraph* FlowGraph = Cast<UFlowGraph>(FlowAsset->GetGraph());
-		if (IsValid(FlowGraph))
-		{
-			FlowGraph->OnSave();
-		}
-	}
+	FAssetEditorToolkit::OnAssetsSaved(SavedObjects);
+
+	TryValidateOnAssetSave(SavedObjects);
+}
+
+void FFlowAssetEditor::OnAssetsSavedAs(const TArray<UObject*>& SavedObjects)
+{
+	FAssetEditorToolkit::OnAssetsSavedAs(SavedObjects);
+
+	TryValidateOnAssetSave(SavedObjects);
 }
 
 bool FFlowAssetEditor::IsTabFocused(const FTabId& TabId) const
@@ -303,6 +299,18 @@ TSharedRef<SDockTab> FFlowAssetEditor::SpawnTab_ValidationLog(const FSpawnTabArg
 		[
 			ValidationLog.ToSharedRef()
 		];
+}
+
+void FFlowAssetEditor::DoPreSaveAssetUpdate() const
+{
+	if (IsValid(FlowAsset))
+	{
+		UFlowGraph* FlowGraph = Cast<UFlowGraph>(FlowAsset->GetGraph());
+		if (IsValid(FlowGraph))
+		{
+			FlowGraph->OnSave();
+		}
+	}
 }
 
 void FFlowAssetEditor::InitFlowAssetEditor(const EToolkitMode::Type Mode, const TSharedPtr<class IToolkitHost>& InitToolkitHost, UObject* ObjectToEdit)
@@ -466,6 +474,21 @@ void FFlowAssetEditor::RefreshAsset()
 {
 	// attempt to refresh graph, fix common issues automatically
 	CastChecked<UFlowGraph>(FlowAsset->GetGraph())->RefreshGraph();
+}
+
+void FFlowAssetEditor::TryValidateOnAssetSave(const TArray<UObject*>& SavedObjects) const
+{
+	for (UObject* SavedObject : SavedObjects)
+	{
+		const UFlowAsset* SavedFlowAsset = Cast<UFlowAsset>(SavedObject);
+		if (SavedFlowAsset && SavedFlowAsset->ShouldValidateOnSave())
+		{
+			if (FFlowAssetEditor* FlowEditor = static_cast<FFlowAssetEditor*>(GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(SavedObject, false)))
+			{
+				FlowEditor->ValidateAsset_Internal();
+			}
+		}
+	}
 }
 
 void FFlowAssetEditor::ValidateAsset(FFlowMessageLog& MessageLog)
